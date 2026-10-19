@@ -9,6 +9,7 @@
 
 const { FacebookAdsApi } = require('facebook-nodejs-business-sdk');
 const config = require("./config");
+const activityLog = require("./activity-log");
 const {
   buildLimitedTimeOfferTemplatePayload,
   buildMediaCardCarouselPayload,
@@ -45,11 +46,34 @@ module.exports = class GraphApi {
         requestBody
       );
       console.log('API call successful:', response);
+      activityLog.record(
+        "out",
+        `Sent ${requestBody.type} message to ${requestBody.to}`,
+        requestBody
+      );
       return response;
     } catch (error) {
       console.error('Error making API call:', error);
+      activityLog.record(
+        "error",
+        `Failed to send ${requestBody.type} message to ${requestBody.to}`,
+        { error: error.message || String(error) }
+      );
       throw error;
     }
+  }
+
+  static async messageWithText(messageId, senderPhoneNumberId, recipientPhoneNumber, messageText) {
+    const requestBody = {
+      messaging_product: "whatsapp",
+      to: recipientPhoneNumber,
+      type: "text",
+      text: {
+        body: messageText,
+      },
+    };
+
+    return this.#makeApiCall(messageId, senderPhoneNumberId, requestBody);
   }
 
   static async messageWithInteractiveReply(messageId, senderPhoneNumberId, recipientPhoneNumber, messageText, replyCTAs) {

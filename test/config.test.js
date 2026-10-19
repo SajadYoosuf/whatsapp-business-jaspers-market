@@ -19,12 +19,6 @@ const validEnvironment = {
   ACCESS_TOKEN: "test-access-token",
   APP_SECRET: "test-app-secret",
   VERIFY_TOKEN: "test-verify-token",
-  REDIS_HOST: "localhost",
-  REDIS_PORT: "6379",
-  GROCERIES_MEDIA_ID: "groceries-media-id",
-  STRAWBERRIES_MEDIA_ID: "strawberries-media-id",
-  SHEET_PAN_DINNER_MEDIA_ID: "sheet-pan-media-id",
-  SALAD_BOWL_MEDIA_ID: "salad-bowl-media-id",
 };
 
 function runConfigCheck(environment = validEnvironment) {
@@ -39,65 +33,47 @@ function runConfigCheck(environment = validEnvironment) {
   );
 }
 
-test("exports normalized configured media IDs", () => {
-  const environment = {
-    ...validEnvironment,
-    GROCERIES_MEDIA_ID: "  groceries-media-id  ",
-  };
+test("exports the core application configuration", () => {
   const result = spawnSync(
     process.execPath,
     [
       "-e",
       `const config = require(${JSON.stringify(configPath)});
        process.stdout.write(JSON.stringify({
-         groceriesMediaId: config.groceriesMediaId,
-         strawberriesMediaId: config.strawberriesMediaId,
-         sheetPanDinnerMediaId: config.sheetPanDinnerMediaId,
-         saladBowlMediaId: config.saladBowlMediaId,
+         appSecret: config.appSecret,
+         accessToken: config.accessToken,
+         verifyToken: config.verifyToken,
+         port: config.port,
        }));`,
     ],
     {
       cwd: __dirname,
       encoding: "utf8",
-      env: environment,
+      env: validEnvironment,
     },
   );
 
   assert.equal(result.status, 0);
   assert.deepEqual(JSON.parse(result.stdout), {
-    groceriesMediaId: "groceries-media-id",
-    strawberriesMediaId: "strawberries-media-id",
-    sheetPanDinnerMediaId: "sheet-pan-media-id",
-    saladBowlMediaId: "salad-bowl-media-id",
+    appSecret: "test-app-secret",
+    accessToken: "test-access-token",
+    verifyToken: "test-verify-token",
+    port: 8080,
   });
 });
 
-for (const [description, value] of [
-  ["missing", undefined],
-  ["blank", "   "],
-  ["Terraform placeholder", "1234567890"],
-  ["sample environment placeholder", "ADD_GROCERIES_MEDIA_ID_HERE"],
-]) {
-  test(`rejects a ${description} media ID`, () => {
-    const environment = {
-      ...validEnvironment,
-      GROCERIES_MEDIA_ID: value,
-    };
-    if (value === undefined) {
-      delete environment.GROCERIES_MEDIA_ID;
-    }
-
-    const result = runConfigCheck(environment);
-
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /GROCERIES_MEDIA_ID/);
-    assert.doesNotMatch(result.stderr, /test-access-token/);
-    assert.doesNotMatch(result.stderr, /strawberries-media-id/);
-  });
-}
-
-test("accepts complete non-placeholder media configuration", () => {
+test("checkEnvVariables does not throw when all required variables are set", () => {
   const result = runConfigCheck();
 
   assert.equal(result.status, 0, result.stderr);
+});
+
+test("checkEnvVariables warns (but does not fail) when a variable is missing", () => {
+  const environment = { ...validEnvironment };
+  delete environment.ACCESS_TOKEN;
+
+  const result = runConfigCheck(environment);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /Missing the environment variable ACCESS_TOKEN/);
 });

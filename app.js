@@ -13,9 +13,12 @@ const { urlencoded, json } = require('body-parser');
 require('dotenv').config();
 const express = require('express');
 
+const path = require('path');
+
 const config = require('./services/config');
 const Conversation = require('./services/conversation');
 const Message = require('./services/message');
+const activityLog = require('./services/activity-log');
 const app = express();
 
 // Parse application/x-www-form-urlencoded
@@ -78,9 +81,56 @@ app.get('/', (req, res) => {
   res.json({
     message: 'Jasper\'s Market Server is running',
     endpoints: [
-      'POST /webhook - WhatsApp webhook endpoint'
+      'POST /webhook - WhatsApp webhook endpoint',
+      'GET /dashboard - local monitoring dashboard'
     ]
   });
+});
+
+// --- Dashboard (local-only monitoring UI, not part of the WhatsApp flow) ---
+
+app.use('/dashboard', express.static(path.join(__dirname, 'public')));
+
+app.get('/api/status', (req, res) => {
+  res.json({
+    port: config.port,
+    defaultSenderPhoneNumberId: process.env.PHONE_NUMBER_ID || null,
+  });
+});
+
+app.get('/api/activity', (req, res) => {
+  res.json(activityLog.getAll());
+});
+
+app.get('/api/activity/stream', (req, res) => {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.flushHeaders();
+
+  const unsubscribe = activityLog.subscribe((event) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  });
+
+  req.on('close', unsubscribe);
+});
+
+app.post('/api/test-send', async (req, res) => {
+  const { to, senderPhoneNumberId, message } = req.body || {};
+
+  if (!to || !senderPhoneNumberId || !message) {
+    res.status(400).json({ error: '"to", "senderPhoneNumberId", and "message" are all required.' });
+    return;
+  }
+
+  try {
+    await Conversation.sendTestMessage(senderPhoneNumberId, to, message);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message || String(error) });
+  }
 });
 
 // Check if all environment variables are set
@@ -108,4 +158,5 @@ function verifyRequestSignature(req, res, buf) {
 
 var listener = app.listen(config.port, () => {
   console.log(`The app is listening on port ${listener.address().port}`);
+  activityLog.record('system', `Server started on port ${listener.address().port}`);
 });

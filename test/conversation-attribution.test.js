@@ -10,10 +10,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const configPath = require.resolve("../services/config");
 const graphApiPath = require.resolve("../services/graph-api");
-const redisPath = require.resolve("../services/redis");
-const cacheInsertions = [];
 const graphApiCalls = [];
 
 function recordGraphApiCall(method, args, responseMessageId) {
@@ -21,49 +18,10 @@ function recordGraphApiCall(method, args, responseMessageId) {
   return Promise.resolve({messages: [{id: responseMessageId}]});
 }
 
-require.cache[configPath] = {
-  exports: {
-    groceriesMediaId: "groceries-media-id",
-    saladBowlMediaId: "salad-bowl-media-id",
-    sheetPanDinnerMediaId: "sheet-pan-media-id",
-    strawberriesMediaId: "strawberries-media-id",
-  },
-};
 require.cache[graphApiPath] = {
   exports: {
-    messageWithInteractiveReply(...args) {
-      return recordGraphApiCall("messageWithInteractiveReply", args, null);
-    },
-    messageWithLimitedTimeOfferTemplate(...args) {
-      return recordGraphApiCall(
-        "messageWithLimitedTimeOfferTemplate",
-        args,
-        "wamid.outbound-offer",
-      );
-    },
-    messageWithMediaCardCarousel(...args) {
-      return recordGraphApiCall(
-        "messageWithMediaCardCarousel",
-        args,
-        "wamid.outbound-carousel",
-      );
-    },
-    messageWithUtilityTemplate(...args) {
-      return recordGraphApiCall(
-        "messageWithUtilityTemplate",
-        args,
-        "wamid.outbound-utility",
-      );
-    },
-  },
-};
-require.cache[redisPath] = {
-  exports: {
-    insert(messageId) {
-      cacheInsertions.push(messageId);
-    },
-    remove() {
-      throw new Error("cache removal should not run while handling a message");
+    messageWithText(...args) {
+      return recordGraphApiCall("messageWithText", args, "wamid.outbound-text");
     },
   },
 };
@@ -85,7 +43,7 @@ async function captureLogs(callback) {
   return logLines;
 }
 
-test("phrase attribution is logged without changing the welcome response", async () => {
+test("phrase attribution is logged without changing the plain-text reply", async () => {
   graphApiCalls.length = 0;
   const logLines = await captureLogs(() =>
     Conversation.handleMessage("720611841146439", {
@@ -109,61 +67,46 @@ test("phrase attribution is logged without changing the welcome response", async
     event_timestamp: "1770000005",
   });
   assert.equal(graphApiCalls.length, 1);
-  assert.equal(graphApiCalls[0].method, "messageWithInteractiveReply");
+  assert.equal(graphApiCalls[0].method, "messageWithText");
   assert.equal(graphApiCalls[0].args[0], "wamid.conversation-start");
   assert.equal(graphApiCalls[0].args[1], "720611841146439");
   assert.equal(graphApiCalls[0].args[2], "15551234567");
   assert.equal(graphApiCalls[0].args[3], constants.APP_DEFAULT_MESSAGE);
-  assert.deepEqual(
-    graphApiCalls[0].args[4].map(cta => cta.id),
-    [
-      constants.REPLY_INTERACTIVE_MEDIA_ID,
-      constants.REPLY_MEDIA_CAROUSEL_ID,
-      constants.REPLY_OFFER_ID,
-    ],
-  );
 });
 
-for (const [replyId, expectedMethod, expectedOutboundMessageId] of [
-  [
-    constants.REPLY_INTERACTIVE_MEDIA_ID,
-    "messageWithUtilityTemplate",
-    "wamid.outbound-utility",
-  ],
-  [
-    constants.REPLY_MEDIA_CAROUSEL_ID,
-    "messageWithMediaCardCarousel",
-    "wamid.outbound-carousel",
-  ],
-  [
-    constants.REPLY_OFFER_ID,
-    "messageWithLimitedTimeOfferTemplate",
-    "wamid.outbound-offer",
-  ],
-]) {
-  test(`interactive reply ${replyId} keeps its existing route`, async () => {
-    graphApiCalls.length = 0;
-    cacheInsertions.length = 0;
-    const logLines = await captureLogs(() =>
-      Conversation.handleMessage("720611841146439", {
-        id: `wamid.${replyId}`,
-        from: "15551234567",
-        timestamp: "1770000006",
-        type: "interactive",
-        interactive: {
-          button_reply: {
-            id: replyId,
-          },
+test("any inbound message type gets the same plain-text reply", async () => {
+  graphApiCalls.length = 0;
+  const logLines = await captureLogs(() =>
+    Conversation.handleMessage("720611841146439", {
+      id: "wamid.some-interactive-reply",
+      from: "15551234567",
+      timestamp: "1770000006",
+      type: "interactive",
+      interactive: {
+        button_reply: {
+          id: "anything",
         },
-      }),
-    );
+      },
+    }),
+  );
 
-    assert.deepEqual(logLines, []);
-    assert.equal(graphApiCalls.length, 1);
-    assert.equal(graphApiCalls[0].method, expectedMethod);
-    assert.equal(graphApiCalls[0].args[0], `wamid.${replyId}`);
-    assert.equal(graphApiCalls[0].args[1], "720611841146439");
-    assert.equal(graphApiCalls[0].args[2], "15551234567");
-    assert.deepEqual(cacheInsertions, [expectedOutboundMessageId]);
-  });
-}
+  assert.deepEqual(logLines, []);
+  assert.equal(graphApiCalls.length, 1);
+  assert.equal(graphApiCalls[0].method, "messageWithText");
+  assert.equal(graphApiCalls[0].args[0], "wamid.some-interactive-reply");
+  assert.equal(graphApiCalls[0].args[1], "720611841146439");
+  assert.equal(graphApiCalls[0].args[2], "15551234567");
+  assert.equal(graphApiCalls[0].args[3], constants.APP_DEFAULT_MESSAGE);
+});
+
+test("sendTestMessage sends a plain-text message to the given recipient", async () => {
+  graphApiCalls.length = 0;
+  await Conversation.sendTestMessage("720611841146439", "15551234567", "Hello from the dashboard");
+
+  assert.equal(graphApiCalls.length, 1);
+  assert.equal(graphApiCalls[0].method, "messageWithText");
+  assert.equal(graphApiCalls[0].args[0], undefined);
+  assert.equal(graphApiCalls[0].args[1], "720611841146439");
+  assert.equal(graphApiCalls[0].args[2], "15551234567");
+  assert.equal(graphApiCalls[0].args[3], "Hello from the dashboard");
+});

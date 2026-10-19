@@ -49,4 +49,8 @@ module.exports = class Cache {
 
         return resp > 0;
     }
+
+    static isReady() {
+        return client.isReady;
+    }
 }

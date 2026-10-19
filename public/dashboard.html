@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jasper's Market — Bot Dashboard</title>
+<style>
+  :root {
+    --bg: #f5f5f3;
+    --card: #ffffff;
+    --border: #e0ded8;
+    --text: #1f1e1c;
+    --muted: #6b6a65;
+    --accent: #1d9e75;
+    --danger: #d85a30;
+    --mono: "SFMono-Regular", Consolas, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 24px;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+  .grid {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 16px;
+    max-width: 1000px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .card h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;}
+  .status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 14px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .dot.ok { background: var(--accent); }
+  .dot.bad { background: var(--danger); }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  input, select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    background: #fff;
+  }
+  button {
+    margin-top: 14px;
+    width: 100%;
+    padding: 10px;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button:active { transform: scale(0.99); }
+  #send-result { font-size: 13px; margin-top: 10px; color: var(--muted); white-space: pre-wrap; }
+  .log { max-height: 520px; overflow-y: auto; }
+  .event {
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0;
+    font-size: 13px;
+  }
+  .event:last-child { border-bottom: none; }
+  .event .meta { display: flex; justify-content: space-between; color: var(--muted); font-family: var(--mono); font-size: 11px; margin-bottom: 3px; }
+  .badge { padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
+  .badge.in { background: #e6f1fb; color: #0c447c; }
+  .badge.out { background: #e1f5ee; color: #085041; }
+  .badge.error { background: #fcebeb; color: #791f1f; }
+  .badge.system { background: #f1efe8; color: #444441; }
+  .empty { color: var(--muted); font-size: 13px; padding: 20px 0; text-align: center; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 11px; margin-top: 4px; }
+  pre { font-size: 11px; background: #faf9f7; padding: 8px; border-radius: 6px; overflow-x: auto; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+
+<h1>Jasper's Market — Bot Dashboard</h1>
+<p class="sub">Local monitor for the WhatsApp webhook server. Not exposed to the internet.</p>
+
+<div class="grid">
+  <div>
+    <div class="card" style="margin-bottom:16px;">
+      <h2>Status</h2>
+      <div class="status-row"><span class="dot" id="dot-server"></span> <span id="text-server">Checking server…</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Send test message</h2>
+      <label for="to">Recipient phone number</label>
+      <input id="to" placeholder="e.g. 919794437444" />
+
+      <label for="sender">Sender phone number ID</label>
+      <input id="sender" placeholder="Phone Number ID" />
+
+      <label for="message">Message text</label>
+      <input id="message" placeholder="Hi! Thanks for reaching out." />
+
+      <button id="send-btn">Send</button>
+      <div id="send-result"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Live activity</h2>
+    <div class="log" id="log"><div class="empty">Waiting for activity…</div></div>
+  </div>
+</div>
+
+<script>
+  const dot = (id, ok) => {
+    document.getElementById(id).className = "dot " + (ok ? "ok" : "bad");
+  };
+
+  async function loadStatus() {
+    try {
+      const res = await fetch("/api/status");
+      const data = await res.json();
+      dot("dot-server", true);
+      document.getElementById("text-server").textContent = "Server running on port " + data.port;
+      if (data.defaultSenderPhoneNumberId && !document.getElementById("sender").value) {
+        document.getElementById("sender").value = data.defaultSenderPhoneNumberId;
+      }
+    } catch (e) {
+      dot("dot-server", false);
+      document.getElementById("text-server").textContent = "Server unreachable";
+    }
+  }
+
+  const logEl = document.getElementById("log");
+  let hasEvents = false;
+
+  function renderEvent(ev) {
+    if (!hasEvents) {
+      logEl.innerHTML = "";
+      hasEvents = true;
+    }
+    const div = document.createElement("div");
+    div.className = "event";
+    const time = new Date(ev.ts).toLocaleTimeString();
+    div.innerHTML =
+      '<div class="meta"><span><span class="badge ' + ev.direction + '">' + ev.direction + '</span> ' + time + '</span></div>' +
+      '<div>' + ev.summary + '</div>' +
+      (ev.detail ? '<details><summary>Details</summary><pre>' + JSON.stringify(ev.detail, null, 2) + '</pre></details>' : '');
+    logEl.prepend(div);
+    while (logEl.children.length > 100) {
+      logEl.removeChild(logEl.lastChild);
+    }
+  }
+
+  async function loadInitialLog() {
+    try {
+      const res = await fetch("/api/activity");
+      const events = await res.json();
+      events.forEach(renderEvent);
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function connectStream() {
+    const source = new EventSource("/api/activity/stream");
+    source.onmessage = (e) => {
+      try {
+        renderEvent(JSON.parse(e.data));
+      } catch (err) {}
+    };
+    source.onerror = () => {
+      source.close();
+      setTimeout(connectStream, 3000);
+    };
+  }
+
+  document.getElementById("send-btn").addEventListener("click", async () => {
+    const to = document.getElementById("to").value.trim();
+    const sender = document.getElementById("sender").value.trim();
+    const message = document.getElementById("message").value.trim();
+    const resultEl = document.getElementById("send-result");
+    const btn = document.getElementById("send-btn");
+
+    if (!to || !sender || !message) {
+      resultEl.textContent = "Enter a recipient number, sender phone number ID, and message text.";
+      return;
+    }
+
+    btn.disabled = true;
+    resultEl.textContent = "Sending…";
+    try {
+      const res = await fetch("/api/test-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, senderPhoneNumberId: sender, message }),
+      });
+      const data = await res.json();
+      resultEl.textContent = res.ok ? "Sent. Check the activity log." : "Failed: " + (data.error || "unknown error");
+    } catch (e) {
+      resultEl.textContent = "Failed: " + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  loadStatus();
+  loadInitialLog();
+  connectStream();
+  setInterval(loadStatus, 10000);
+</script>
+
+</body>
+</html>
